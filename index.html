@@ -116,6 +116,13 @@
             border-top-color: #3b82f6;
             animation: spin 0.8s linear infinite;
         }
+        .mini-spinner {
+            width: 16px; height: 16px; border-radius: 50%;
+            border: 2px solid rgba(59,130,246,0.25);
+            border-top-color: #3b82f6;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
         #map { width: 100%; height: 100%; z-index: 10; }
 
         .glass {
@@ -123,27 +130,52 @@
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
         }
+
+        /* Weather chip fade in */
+        @keyframes wxIn { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
+        .wx-chip { animation: wxIn .35s ease both; }
+
+        /* Date input — make the native picker fit the dark header */
+        input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
     </style>
 </head>
 <body class="bg-gray-100 flex flex-col md:flex-row h-screen overflow-hidden text-gray-800">
 
     <aside class="w-full md:w-1/3 lg:w-[400px] bg-white h-[50vh] md:h-screen flex flex-col shadow-xl z-20 relative">
-        <div class="relative text-white p-6 shrink-0 overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900">
+        <div class="relative text-white p-6 pb-4 shrink-0 overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900">
             <div class="absolute -right-8 -top-10 w-40 h-40 bg-blue-500/20 rounded-full blur-2xl"></div>
             <div class="absolute -left-6 bottom-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl"></div>
             <div class="relative">
                 <p class="text-blue-300 text-xs font-semibold tracking-[0.2em] uppercase mb-1">Pacific Coast Loop</p>
                 <h1 class="text-2xl font-extrabold mb-3 leading-tight">West Coast Round Trip</h1>
-                <div class="flex flex-wrap gap-2 text-xs">
+                <div class="flex flex-wrap gap-2 text-xs mb-3">
                     <span class="glass !bg-white/10 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium">
                         <i class="fa-solid fa-calendar-days text-blue-300"></i> 14 Days
                     </span>
-                    <span class="glass !bg-white/10 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium">
+                    <span id="chip-distance" class="glass !bg-white/10 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium">
                         <i class="fa-solid fa-route text-emerald-300"></i> ~4,800 km
                     </span>
                     <span class="glass !bg-white/10 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium">
                         <i class="fa-solid fa-location-dot text-amber-300"></i> 8 Stops
                     </span>
+                    <span id="chip-fx" class="hidden glass !bg-white/10 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium" title="Live exchange rate (open.er-api.com)">
+                        <i class="fa-solid fa-money-bill-transfer text-emerald-300"></i> <span id="fx-text"></span>
+                    </span>
+                </div>
+
+                <!-- Trip settings: editable start date + tools -->
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <label class="glass !bg-white/10 px-3 py-1.5 rounded-full flex items-center gap-2 font-medium cursor-pointer">
+                        <i class="fa-solid fa-flag-checkered text-blue-300"></i>
+                        <span class="text-blue-200">Start:</span>
+                        <input type="date" id="start-date" class="bg-transparent text-white font-semibold outline-none cursor-pointer w-[118px]">
+                    </label>
+                    <button id="btn-route-panel" class="glass !bg-white/10 hover:!bg-white/20 px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium transition-colors">
+                        <i class="fa-solid fa-shuffle text-amber-300"></i> Routes &amp; Tolls
+                    </button>
+                    <button id="btn-export-ics" class="glass !bg-white/10 hover:!bg-white/20 px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium transition-colors" title="Download itinerary as a calendar (.ics) file">
+                        <i class="fa-solid fa-calendar-plus text-emerald-300"></i> Calendar
+                    </button>
                 </div>
             </div>
         </div>
@@ -172,6 +204,52 @@
             <i class="fa-solid fa-expand"></i>
         </button>
 
+        <!-- ============ Route Options / Tolls / Fuel panel ============ -->
+        <div id="route-panel" class="hidden absolute top-4 left-4 z-[450] w-[320px] max-w-[calc(100%-2rem)] max-h-[calc(100%-6rem)] overflow-y-auto glass rounded-2xl shadow-2xl border border-white/60">
+            <div class="flex items-center justify-between px-4 pt-3 pb-2 sticky top-0 glass z-10 rounded-t-2xl">
+                <h3 class="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-shuffle text-trip-accent"></i> Route Options
+                </h3>
+                <button id="btn-close-route-panel" class="text-gray-400 hover:text-gray-700 w-7 h-7 rounded-full hover:bg-gray-200/60 transition-colors">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div id="route-legs" class="px-4 pb-2 space-y-3">
+                <!-- per-leg scenic/fast switches injected via JS -->
+            </div>
+
+            <div class="px-4 pb-2">
+                <div id="route-summary" class="text-xs bg-white/70 rounded-xl p-3 border border-gray-200 text-gray-700"></div>
+            </div>
+
+            <!-- Tolls & fees -->
+            <div class="px-4 pb-2">
+                <h4 class="font-bold text-slate-700 text-xs uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                    <i class="fa-solid fa-road-barrier text-amber-500"></i> Tolls &amp; Fees on this route
+                </h4>
+                <div id="toll-list" class="space-y-1.5 text-xs"></div>
+            </div>
+
+            <!-- Fuel estimator -->
+            <div class="px-4 pb-4">
+                <h4 class="font-bold text-slate-700 text-xs uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                    <i class="fa-solid fa-gas-pump text-emerald-600"></i> Fuel estimate
+                </h4>
+                <div class="bg-white/70 rounded-xl p-3 border border-gray-200 text-xs space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                        <label class="text-gray-600">Fuel price ($/L)</label>
+                        <input type="number" id="fuel-price" step="0.05" min="0" class="w-20 border border-gray-300 rounded-lg px-2 py-1 text-right font-semibold">
+                    </div>
+                    <div class="flex items-center justify-between gap-2">
+                        <label class="text-gray-600">Consumption (L/100km)</label>
+                        <input type="number" id="fuel-cons" step="0.5" min="0" class="w-20 border border-gray-300 rounded-lg px-2 py-1 text-right font-semibold">
+                    </div>
+                    <div id="fuel-result" class="pt-1 border-t border-gray-200 font-bold text-slate-800"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Animation progress bar -->
         <div id="anim-progress-wrap" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-[400] w-[80%] max-w-md glass rounded-full p-1 shadow-lg">
             <div class="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
@@ -187,6 +265,28 @@
             <i class="fa-solid fa-stop"></i> Stop Trip
         </button>
     </main>
+
+    <!-- ============ Hotel availability modal ============ -->
+    <div id="hotel-modal" class="hidden fixed inset-0 z-[1000] flex items-end md:items-center justify-center">
+        <div id="hotel-modal-bg" class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
+        <div class="relative bg-white w-full md:w-[560px] max-h-[85vh] rounded-t-3xl md:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-5 pb-4 bg-gradient-to-br from-slate-900 to-blue-900 text-white shrink-0">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-blue-300 text-[11px] font-bold uppercase tracking-widest mb-0.5">Hotel Availability</p>
+                        <h3 id="hotel-modal-title" class="text-xl font-extrabold leading-tight"></h3>
+                        <p id="hotel-modal-dates" class="text-sm text-blue-200 mt-1"></p>
+                    </div>
+                    <button id="btn-close-hotels" class="text-white/70 hover:text-white w-9 h-9 rounded-full hover:bg-white/10 transition-colors shrink-0">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+                <!-- Deep links with dates prefilled -->
+                <div id="hotel-deeplinks" class="flex flex-wrap gap-2 mt-3 text-xs"></div>
+            </div>
+            <div id="hotel-results" class="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50"></div>
+        </div>
+    </div>
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
@@ -221,64 +321,106 @@
             { latlng: C_SIDNEY,  type: 'stop', stopId: 'stop-8' }  // Day 14 Return
         ];
 
+        // dayStart = which trip day you ARRIVE; nights = nights slept there
         const itineraryData = [
             {
-                id: "stop-1", day: "Day 1", title: "Sidney, BC to Seattle, WA", location: "Washington, USA",
+                id: "stop-1", day: "Day 1", dayStart: 1, nights: 1, title: "Sidney, BC to Seattle, WA", location: "Washington, USA",
                 type: "start", coords: C_SEATTLE, icon: "fa-ferry",
                 desc: "Start your epic loop. Take the BC Ferry from Swartz Bay to Tsawwassen, cross the border, and drive down to Seattle.",
-                transit: "Ferry (1h 35m) + Drive (2h 30m)", hotel: "The Edgewater Hotel, Seattle",
+                transit: "Ferry (1h 35m) + Drive (2h 30m)", hotel: "The Edgewater Hotel, Seattle", hotelSearch: "Seattle, Washington",
                 image: "https://commons.wikimedia.org/wiki/Special:FilePath/Seattle_Kerry_Park_Skyline.jpg?width=1200"
             },
             {
-                id: "stop-2", day: "Day 2", title: "Redwood National Park", location: "Northern California",
+                id: "stop-2", day: "Day 2", dayStart: 2, nights: 1, title: "Redwood National Park", location: "Northern California",
                 type: "park", coords: C_REDWOOD, icon: "fa-tree",
                 desc: "A scenic driving day down the coast. Arrive at the Redwoods and marvel at the tallest trees on Earth.",
-                transit: "Drive: 7h 30m via US-101 & Oregon Coast (scenic)", hotel: "Elk Meadow Cabins, Orick",
+                transit: "Drive: 7h 30m via US-101 & Oregon Coast (scenic)", hotel: "Elk Meadow Cabins, Orick", hotelSearch: "Orick, California",
                 image: "https://commons.wikimedia.org/wiki/Special:FilePath/Redwood_National_Park,_fog_in_the_forest.jpg?width=1200"
             },
             {
-                id: "stop-3", day: "Day 3-5", title: "San Francisco, CA", location: "Bay Area",
+                id: "stop-3", day: "Day 3-5", dayStart: 3, nights: 3, title: "San Francisco, CA", location: "Bay Area",
                 type: "city", coords: C_SF, icon: "fa-bridge-water",
                 desc: "Spend 3 full days exploring the Golden Gate Bridge, Alcatraz, Fisherman's Wharf, and the diverse neighborhoods of SF.",
-                transit: "Drive: 6h via Highway 1 (Mendocino Coast)", hotel: "Fairmont San Francisco",
+                transit: "Drive: 6h via Highway 1 (Mendocino Coast)", hotel: "Fairmont San Francisco", hotelSearch: "San Francisco, California",
                 image: "https://commons.wikimedia.org/wiki/Special:FilePath/Golden_Gate_Bridge_as_seen_from_Battery_East.jpg?width=1200"
             },
             {
-                id: "stop-4", day: "Day 6-9", title: "Los Angeles, CA", location: "Southern California",
+                id: "stop-4", day: "Day 6-9", dayStart: 6, nights: 4, title: "Los Angeles, CA", location: "Southern California",
                 type: "city", coords: C_LA, icon: "fa-star",
                 desc: "Enjoy 4 days in LA. Relax on Santa Monica beach, hike to the Hollywood sign, and soak in the SoCal sun.",
-                transit: "Drive: 9h via Highway 1 (Big Sur & PCH)", hotel: "Santa Monica Proper Hotel",
+                transit: "Drive: 9h via Highway 1 (Big Sur & PCH)", hotel: "Santa Monica Proper Hotel", hotelSearch: "Santa Monica, California",
                 image: "https://commons.wikimedia.org/wiki/Special:FilePath/Echo_Park_Lake_with_Downtown_Los_Angeles_Skyline.jpg?width=1200"
             },
             {
-                id: "stop-5", day: "Day 10", title: "Las Vegas, NV", location: "Nevada",
+                id: "stop-5", day: "Day 10", dayStart: 10, nights: 1, title: "Las Vegas, NV", location: "Nevada",
                 type: "city", coords: C_VEGAS, icon: "fa-dice",
                 desc: "Head inland through the desert for a wild night experiencing the bright lights, shows, and casinos of the Vegas Strip.",
-                transit: "Drive: 4h 15m via I-15 N", hotel: "The Venetian Resort",
+                transit: "Drive: 4h 15m via I-15 N", hotel: "The Venetian Resort", hotelSearch: "Las Vegas Strip, Nevada",
                 image: "https://commons.wikimedia.org/wiki/Special:FilePath/Las_Vegas_strip.jpg?width=1200"
             },
             {
-                id: "stop-6", day: "Day 11-12", title: "Yosemite National Park", location: "Sierra Nevada",
+                id: "stop-6", day: "Day 11-12", dayStart: 11, nights: 2, title: "Yosemite National Park", location: "Sierra Nevada",
                 type: "park", coords: C_YOSEM, icon: "fa-mountain-sun",
                 desc: "Head back to nature. Spend 2 days hiking the valleys, seeing waterfalls, and witnessing the granite cliffs of El Capitan.",
-                transit: "Drive: 6h via US-95 & Tioga Pass (Summer)", hotel: "The Ahwahnee Hotel",
+                transit: "Drive: 6h via US-95 & Tioga Pass (Summer)", hotel: "The Ahwahnee Hotel", hotelSearch: "Yosemite Valley, California",
                 image: "https://commons.wikimedia.org/wiki/Special:FilePath/Tunnel_View,_Yosemite_Valley,_Yosemite_NP_-_Diliff.jpg?width=1200"
             },
             {
-                id: "stop-7", day: "Day 13", title: "Portland, OR", location: "Pacific Northwest",
+                id: "stop-7", day: "Day 13", dayStart: 13, nights: 1, title: "Portland, OR", location: "Pacific Northwest",
                 type: "city", coords: C_PORT, icon: "fa-mug-hot",
                 desc: "The long haul north begins. Stop in Portland to stretch your legs, visit food trucks, and enjoy local artisan coffee.",
-                transit: "Drive: 10h 30m via I-5 N (Long drive)", hotel: "The Nines, a Luxury Collection Hotel",
+                transit: "Drive: 10h 30m via I-5 N (Long drive)", hotel: "The Nines, a Luxury Collection Hotel", hotelSearch: "Portland, Oregon",
                 image: "https://commons.wikimedia.org/wiki/Special:FilePath/Portland_Oregon_Aerial,_June_2025.jpg?width=1200"
             },
             {
-                id: "stop-8", day: "Day 14", title: "Sidney, BC, Canada", location: "Vancouver Island",
+                id: "stop-8", day: "Day 14", dayStart: 14, nights: 0, title: "Sidney, BC, Canada", location: "Vancouver Island",
                 type: "end", coords: C_SIDNEY, icon: "fa-house",
                 desc: "Drive to Tsawwassen, catch the ferry back to Vancouver Island, and arrive home with incredible memories.",
-                transit: "Drive (5.5h) + Ferry to Swartz Bay (1.5h)", hotel: "Home Sweet Home",
+                transit: "Drive (5.5h) + Ferry to Swartz Bay (1.5h)", hotel: "Home Sweet Home", hotelSearch: null,
                 image: "https://commons.wikimedia.org/wiki/Special:FilePath/British_Columbia_Parliament_Buildings.jpg?width=1200"
             }
         ];
+
+        // =====================================================================
+        //  TRIP DATES — editable start date drives card dates, weather & hotels
+        // =====================================================================
+        function defaultStartDate() {
+            const d = new Date();
+            d.setDate(d.getDate() + 30); // default: a month from now
+            return toISO(d);
+        }
+        function toISO(d) {
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        }
+        function parseISO(s) { // local-time safe (new Date('YYYY-MM-DD') is UTC)
+            const [y, m, d] = s.split('-').map(Number);
+            return new Date(y, m - 1, d);
+        }
+        function addDays(date, n) {
+            const d = new Date(date);
+            d.setDate(d.getDate() + n);
+            return d;
+        }
+        function fmtShort(d) {
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        }
+        function getStartDate() {
+            return parseISO(localStorage.getItem('tripStartDate') || defaultStartDate());
+        }
+        // Arrival date for a stop
+        function stopCheckin(stop)  { return addDays(getStartDate(), stop.dayStart - 1); }
+        function stopCheckout(stop) { return addDays(stopCheckin(stop), Math.max(stop.nights, 1)); }
+
+        function renderStopDates() {
+            itineraryData.forEach(stop => {
+                const el = document.getElementById(`dates-${stop.id}`);
+                if (!el) return;
+                const ci = stopCheckin(stop);
+                el.textContent = stop.nights > 1
+                    ? `${fmtShort(ci)} – ${fmtShort(addDays(ci, stop.nights - 1))}`
+                    : fmtShort(ci);
+            });
+        }
 
         const map = L.map('map', { zoomControl: false }).setView([42.5, -120], 5);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -316,7 +458,11 @@
                 <div class="h-32 overflow-hidden relative">
                     <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent z-10"></div>
                     <img src="${stop.image}" alt="${stop.title}" loading="lazy" onerror="this.onerror=null;this.src='${fb}';" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out">
-                    <div class="absolute top-2 left-2 z-20 ${badgeClass} text-white text-xs font-bold px-2.5 py-1 rounded-md shadow">${stop.day}</div>
+                    <div class="absolute top-2 left-2 z-20 flex items-center gap-1.5">
+                        <span class="${badgeClass} text-white text-xs font-bold px-2.5 py-1 rounded-md shadow">${stop.day}</span>
+                        <span id="dates-${stop.id}" class="bg-black/50 backdrop-blur text-white text-[11px] font-semibold px-2 py-1 rounded-md shadow"></span>
+                    </div>
+                    <div id="weather-${stop.id}" class="absolute top-2 right-2 z-20"></div>
                     <div class="absolute bottom-2 left-3 z-20 text-white">
                         <h3 class="font-bold text-base leading-tight drop-shadow-md">${stop.title}</h3>
                         <p class="text-[11px] text-gray-200 font-medium uppercase tracking-wide drop-shadow">${stop.location}</p>
@@ -340,6 +486,10 @@
                                 <i class="fa-solid fa-bed text-trip-highlight mt-0.5 w-4 text-center"></i>
                                 <span class="text-gray-700 leading-tight"><strong>Stay:</strong> ${stop.hotel}</span>
                             </div>
+                            ${stop.hotelSearch ? `
+                            <button onclick="event.stopPropagation(); openHotelModal('${stop.id}')" class="w-full mt-1 bg-trip-accent/10 hover:bg-trip-accent hover:text-white text-trip-accent text-xs font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5">
+                                <i class="fa-solid fa-magnifying-glass"></i> Check hotel availability
+                            </button>` : ''}
                         </div>
                     </div>
                 </div>
@@ -383,9 +533,198 @@
         });
 
         // =====================================================================
-        //  ROAD-FOLLOWING ROUTE ENGINE
-        //  Build legs between consecutive waypoints, fetch real driving geometry
-        //  from OSRM (ferry legs stay as straight sea lines), then draw + animate.
+        //  WEATHER — Open-Meteo (free, no API key)
+        //  Dates within the 16-day forecast window use the live forecast;
+        //  further-out dates show "typical" weather (same dates last year).
+        // =====================================================================
+        function wxIcon(code) {
+            if (code === 0) return ['fa-sun', 'text-amber-400'];
+            if (code <= 2)  return ['fa-cloud-sun', 'text-amber-300'];
+            if (code === 3) return ['fa-cloud', 'text-gray-300'];
+            if (code <= 48) return ['fa-smog', 'text-gray-300'];
+            if (code <= 57) return ['fa-cloud-rain', 'text-blue-300'];
+            if (code <= 67) return ['fa-cloud-showers-heavy', 'text-blue-400'];
+            if (code <= 77) return ['fa-snowflake', 'text-cyan-200'];
+            if (code <= 82) return ['fa-cloud-showers-heavy', 'text-blue-400'];
+            if (code <= 86) return ['fa-snowflake', 'text-cyan-200'];
+            return ['fa-cloud-bolt', 'text-purple-300'];
+        }
+
+        async function loadWeatherForStop(stop) {
+            const el = document.getElementById(`weather-${stop.id}`);
+            if (!el) return;
+            el.innerHTML = `<div class="bg-black/50 backdrop-blur rounded-md px-2 py-1"><span class="mini-spinner"></span></div>`;
+
+            const [lat, lng] = stop.coords;
+            const ci = stopCheckin(stop);
+            const co = addDays(ci, Math.max(stop.nights, 1) - 1);
+            const today = new Date(); today.setHours(0,0,0,0);
+            const daysOut = Math.round((ci - today) / 86400000);
+
+            let url, typical = false;
+            if (daysOut >= 0 && daysOut <= 14) {
+                url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
+                      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
+                      `&start_date=${toISO(ci)}&end_date=${toISO(co)}&timezone=auto`;
+            } else {
+                // Out of forecast range -> same dates last year as a "typical" guide
+                typical = true;
+                const lyCi = new Date(ci); lyCi.setFullYear(lyCi.getFullYear() - 1);
+                const lyCo = new Date(co); lyCo.setFullYear(lyCo.getFullYear() - 1);
+                url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}` +
+                      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum` +
+                      `&start_date=${toISO(lyCi)}&end_date=${toISO(lyCo)}&timezone=auto`;
+            }
+
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('weather ' + res.status);
+                const data = await res.json();
+                const d = data.daily;
+                if (!d || !d.temperature_2m_max || !d.temperature_2m_max.length) throw new Error('no data');
+
+                const hi = Math.round(Math.max(...d.temperature_2m_max));
+                const lo = Math.round(Math.min(...d.temperature_2m_min));
+                // dominant (max) weather code across the stay = "worst case" look
+                const code = Math.max(...d.weather_code);
+                const [icon, color] = wxIcon(code);
+
+                let rainBit = '';
+                if (!typical && d.precipitation_probability_max) {
+                    const p = Math.max(...d.precipitation_probability_max.filter(v => v !== null));
+                    if (p >= 20) rainBit = `<span class="text-blue-200 ml-1"><i class="fa-solid fa-droplet text-[9px]"></i>${p}%</span>`;
+                } else if (typical && d.precipitation_sum) {
+                    const mm = d.precipitation_sum.reduce((a, b) => a + (b || 0), 0);
+                    if (mm >= 2) rainBit = `<span class="text-blue-200 ml-1"><i class="fa-solid fa-droplet text-[9px]"></i>${Math.round(mm)}mm</span>`;
+                }
+
+                el.innerHTML = `
+                    <div class="wx-chip bg-black/55 backdrop-blur rounded-lg px-2 py-1 text-white text-[11px] font-bold flex items-center gap-1.5 shadow"
+                         title="${typical ? 'Typical weather (same dates last year) — too far out for a live forecast' : 'Live forecast (Open-Meteo)'}">
+                        <i class="fa-solid ${icon} ${color}"></i>
+                        <span>${hi}°/${lo}°C</span>${rainBit}
+                        ${typical ? '<span class="text-gray-300 font-medium text-[9px] uppercase">typ.</span>' : ''}
+                    </div>`;
+            } catch (e) {
+                el.innerHTML = '';
+                console.warn('Weather unavailable for', stop.title, e.message);
+            }
+        }
+
+        function loadAllWeather() {
+            itineraryData.forEach(loadWeatherForStop);
+        }
+
+        // =====================================================================
+        //  HOTEL AVAILABILITY — Overpass (OSM) for nearby hotels + deep links
+        //  with your trip dates prefilled into Booking / Expedia / Google.
+        //  (Live price APIs all need secret keys, which can't live in a
+        //  public static page — deep links open real availability instantly.)
+        // =====================================================================
+        const hotelModal = document.getElementById('hotel-modal');
+
+        function bookingUrl(query, ci, co) {
+            return `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(query)}&checkin=${toISO(ci)}&checkout=${toISO(co)}&group_adults=2&no_rooms=1`;
+        }
+        function expediaUrl(query, ci, co) {
+            return `https://www.expedia.com/Hotel-Search?destination=${encodeURIComponent(query)}&startDate=${toISO(ci)}&endDate=${toISO(co)}&adults=2`;
+        }
+        function googleHotelsUrl(query) {
+            return `https://www.google.com/travel/search?q=${encodeURIComponent('hotels in ' + query)}`;
+        }
+
+        async function openHotelModal(stopId) {
+            const stop = itineraryData.find(s => s.id === stopId);
+            if (!stop || !stop.hotelSearch) return;
+            const ci = stopCheckin(stop), co = stopCheckout(stop);
+
+            document.getElementById('hotel-modal-title').textContent = stop.title;
+            document.getElementById('hotel-modal-dates').innerHTML =
+                `<i class="fa-solid fa-calendar-days mr-1"></i> ${fmtShort(ci)} → ${fmtShort(co)} · ${Math.max(stop.nights,1)} night${stop.nights > 1 ? 's' : ''} · 2 adults`;
+
+            document.getElementById('hotel-deeplinks').innerHTML = `
+                <a href="${bookingUrl(stop.hotelSearch, ci, co)}" target="_blank" rel="noopener" class="bg-white text-blue-900 font-bold px-3 py-1.5 rounded-full hover:bg-blue-100 transition-colors flex items-center gap-1.5">
+                    <i class="fa-solid fa-b"></i> Booking.com
+                </a>
+                <a href="${expediaUrl(stop.hotelSearch, ci, co)}" target="_blank" rel="noopener" class="bg-white/15 text-white font-bold px-3 py-1.5 rounded-full hover:bg-white/25 transition-colors flex items-center gap-1.5">
+                    <i class="fa-solid fa-plane"></i> Expedia
+                </a>
+                <a href="${googleHotelsUrl(stop.hotelSearch)}" target="_blank" rel="noopener" class="bg-white/15 text-white font-bold px-3 py-1.5 rounded-full hover:bg-white/25 transition-colors flex items-center gap-1.5">
+                    <i class="fa-brands fa-google"></i> Google Hotels
+                </a>
+                <a href="${bookingUrl(stop.hotel, ci, co)}" target="_blank" rel="noopener" class="bg-emerald-500/90 text-white font-bold px-3 py-1.5 rounded-full hover:bg-emerald-400 transition-colors flex items-center gap-1.5">
+                    <i class="fa-solid fa-bed"></i> Planned: ${stop.hotel.split(',')[0]}
+                </a>`;
+
+            const results = document.getElementById('hotel-results');
+            results.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-10 gap-3 text-gray-500">
+                    <div class="route-spinner"></div>
+                    <p class="text-sm font-medium">Finding hotels near ${stop.title}…</p>
+                </div>`;
+            hotelModal.classList.remove('hidden');
+
+            // Overpass: real hotels from OpenStreetMap within ~7 km
+            const [lat, lng] = stop.coords;
+            const q = `[out:json][timeout:25];(node["tourism"="hotel"](around:7000,${lat},${lng});way["tourism"="hotel"](around:7000,${lat},${lng}););out center 40;`;
+            try {
+                const res = await fetch('https://overpass-api.de/api/interpreter', {
+                    method: 'POST',
+                    body: 'data=' + encodeURIComponent(q)
+                });
+                if (!res.ok) throw new Error('Overpass ' + res.status);
+                const data = await res.json();
+
+                const hotels = (data.elements || [])
+                    .filter(e => e.tags && e.tags.name)
+                    .map(e => ({
+                        name: e.tags.name,
+                        stars: e.tags.stars,
+                        website: e.tags.website || e.tags['contact:website'],
+                        lat: e.lat || (e.center && e.center.lat),
+                        lng: e.lon || (e.center && e.center.lon)
+                    }))
+                    // de-dupe by name
+                    .filter((h, i, arr) => arr.findIndex(x => x.name === h.name) === i)
+                    .slice(0, 20);
+
+                if (!hotels.length) {
+                    results.innerHTML = `<p class="text-center text-sm text-gray-500 py-8">No hotels found in OpenStreetMap near here — use the search links above.</p>`;
+                    return;
+                }
+
+                results.innerHTML = `<p class="text-[11px] text-gray-400 font-semibold uppercase tracking-wide px-1">${hotels.length} hotels nearby (OpenStreetMap) — tap to check availability for your dates</p>` +
+                    hotels.map(h => `
+                        <div class="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3 hover:shadow-md transition-shadow">
+                            <div class="w-9 h-9 rounded-lg bg-trip-accent/10 text-trip-accent flex items-center justify-center shrink-0">
+                                <i class="fa-solid fa-hotel"></i>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="font-bold text-sm text-slate-800 truncate">${h.name}</p>
+                                <p class="text-[11px] text-gray-500">${h.stars ? '★'.repeat(Math.min(5, Math.round(parseFloat(h.stars)))) + ' · ' : ''}${(getDistance(stop.coords, [h.lat, h.lng])).toFixed(1)} km away</p>
+                            </div>
+                            <div class="flex gap-1.5 shrink-0">
+                                <a href="${bookingUrl(h.name + ', ' + stop.hotelSearch, ci, co)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
+                                   class="bg-trip-accent text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-blue-600 transition-colors" title="Check availability on Booking.com">
+                                    Avail.
+                                </a>
+                                <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(h.name)}&query_place_id=&center=${h.lat},${h.lng}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
+                                   class="bg-gray-100 text-gray-600 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors" title="Open in Google Maps">
+                                    <i class="fa-solid fa-map-location-dot"></i>
+                                </a>
+                            </div>
+                        </div>`).join('');
+            } catch (e) {
+                results.innerHTML = `<p class="text-center text-sm text-gray-500 py-8">Couldn't load nearby hotels (${e.message}).<br>Use the Booking / Expedia / Google links above — your dates are already filled in.</p>`;
+            }
+        }
+        document.getElementById('btn-close-hotels').addEventListener('click', () => hotelModal.classList.add('hidden'));
+        document.getElementById('hotel-modal-bg').addEventListener('click', () => hotelModal.classList.add('hidden'));
+
+        // =====================================================================
+        //  ROAD-FOLLOWING ROUTE ENGINE + ALTERNATE ROUTE SWITCHING
+        //  Each switchable leg gets BOTH a scenic (coastal via-points) and a
+        //  fast (no via) geometry from OSRM, so toggling redraws instantly.
         // =====================================================================
 
         // Haversine distance (km)
@@ -397,10 +736,7 @@
             return R * 2 * Math.asin(Math.sqrt(a));
         }
 
-        // Coastal "via" waypoints — force the SOUTHBOUND ("there") legs to hug the
-        // Pacific coast / Highway 1 instead of the faster inland I-5. The return
-        // (northbound) legs are left on the fast inland route so the loop varies.
-        // Keyed by the destination stop's id.
+        // Coastal "via" waypoints for the scenic variants, keyed by destination stop id
         const COASTAL_VIA = {
             'stop-2': [ // Seattle -> Redwoods, down the Oregon Coast (US-101)
                 [46.1879, -123.8313], // Astoria, OR
@@ -423,6 +759,16 @@
             ]
         };
 
+        const SWITCHABLE = {
+            'stop-2': { label: 'Seattle → Redwoods', scenic: 'Oregon Coast (US-101)', fast: 'Inland (I-5)' },
+            'stop-3': { label: 'Redwoods → San Francisco', scenic: 'Mendocino Coast (Hwy 1)', fast: 'Inland (US-101)' },
+            'stop-4': { label: 'San Francisco → Los Angeles', scenic: 'Big Sur / PCH (Hwy 1)', fast: 'Inland (I-5)' }
+        };
+
+        // chosen mode per switchable leg ('scenic' | 'fast'), persisted
+        let routeModes = JSON.parse(localStorage.getItem('routeModes') || '{}');
+        Object.keys(SWITCHABLE).forEach(id => { if (!routeModes[id]) routeModes[id] = 'scenic'; });
+
         // Build legs
         const legs = [];
         for (let i = 0; i < routeWaypoints.length - 1; i++) {
@@ -431,23 +777,43 @@
                 a, b,
                 mode: b.isFerryToHere ? 'ferry' : 'drive',
                 via: (b.stopId && COASTAL_VIA[b.stopId]) ? COASTAL_VIA[b.stopId] : [],
-                points: [a.latlng, b.latlng]   // straight-line fallback by default
+                switchId: (b.stopId && SWITCHABLE[b.stopId]) ? b.stopId : null,
+                opts: {},                       // { scenic: {points,km,hrs}, fast: {...} }
+                points: [a.latlng, b.latlng]    // straight-line fallback by default
             });
         }
 
-        // Fetch a single driving leg geometry from the public OSRM server
+        async function osrmRoute(coordList) {
+            const coords = coordList.map(([lat, lng]) => `${lng},${lat}`).join(';');
+            const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('OSRM ' + res.status);
+            const data = await res.json();
+            if (!data.routes || !data.routes[0]) throw new Error('no route');
+            const r = data.routes[0];
+            return {
+                points: r.geometry.coordinates.map(c => [c[1], c[0]]),
+                km: r.distance / 1000,
+                hrs: r.duration / 3600
+            };
+        }
+
+        // Fetch leg geometry/geometries from the public OSRM server
         async function fetchLeg(leg) {
             if (leg.mode === 'ferry') return; // ferries keep the straight sea line
-            // Build "lng,lat;lng,lat;..." with any coastal via points in between
-            const coords = [leg.a.latlng, ...leg.via, leg.b.latlng]
-                .map(([lat, lng]) => `${lng},${lat}`).join(';');
-            const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
             try {
-                const res = await fetch(url);
-                if (!res.ok) throw new Error('OSRM ' + res.status);
-                const data = await res.json();
-                if (data.routes && data.routes[0]) {
-                    leg.points = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                if (leg.switchId) {
+                    // fetch BOTH variants in parallel for instant switching
+                    const [scenic, fast] = await Promise.all([
+                        osrmRoute([leg.a.latlng, ...leg.via, leg.b.latlng]),
+                        osrmRoute([leg.a.latlng, leg.b.latlng])
+                    ]);
+                    leg.opts = { scenic, fast };
+                    leg.points = leg.opts[routeModes[leg.switchId]].points;
+                } else {
+                    const r = await osrmRoute([leg.a.latlng, leg.b.latlng]);
+                    leg.opts = { fast: r };
+                    leg.points = r.points;
                 }
             } catch (e) {
                 // Network/CORS failure -> keep straight-line fallback so the map still works
@@ -455,30 +821,130 @@
             }
         }
 
-        // Flattened path data for the animation engine (built after drawing)
+        // =====================================================================
+        //  TOLLS & FEES — known toll points along the West Coast loop.
+        //  Road tolls are detected by checking if the chosen route passes
+        //  within ~2.5 km of the toll location, so rerouting updates them.
+        // =====================================================================
+        const TOLL_POINTS = [
+            { name: 'Golden Gate Bridge (southbound into SF)', latlng: [37.8199, -122.4783], price: 9.75, cur: 'USD',
+              note: 'Pay-by-plate / FasTrak. Alternative: Richmond–San Rafael Br. ($8) — no free crossing into SF from the north.' },
+            { name: 'SR-99 Tunnel, downtown Seattle', latlng: [47.6097, -122.3422], price: 2.70, cur: 'USD',
+              note: 'Only if routed through the waterfront tunnel; I-5 through Seattle is free.' }
+        ];
+        const FIXED_FEES = [
+            { name: 'BC Ferries: Swartz Bay → Tsawwassen (vehicle + driver)', price: 95, cur: 'CAD', icon: 'fa-ferry' },
+            { name: 'BC Ferries: Tsawwassen → Swartz Bay (vehicle + driver)', price: 95, cur: 'CAD', icon: 'fa-ferry' },
+            { name: 'Yosemite NP entrance (per vehicle, 7 days)', price: 35, cur: 'USD', icon: 'fa-tree' },
+            { name: 'Redwood NP entrance', price: 0, cur: 'USD', icon: 'fa-tree' }
+        ];
+
+        function detectRoadTolls() {
+            const found = [];
+            TOLL_POINTS.forEach(t => {
+                // sample every 4th point for speed
+                for (let i = 0; i < routePts.length; i += 4) {
+                    if (getDistance(routePts[i], t.latlng) < 2.5) { found.push(t); break; }
+                }
+            });
+            return found;
+        }
+
+        let fxUsdToCad = null; // live rate, filled by loadFx()
+
+        function renderTolls() {
+            const el = document.getElementById('toll-list');
+            if (!el || !routePts.length) return;
+            const road = detectRoadTolls();
+
+            let usd = 0, cad = 0;
+            const row = (icon, name, price, cur, note) => `
+                <div class="bg-white/70 rounded-lg p-2 border border-gray-200" ${note ? `title="${note}"` : ''}>
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-gray-700 flex items-center gap-1.5 min-w-0"><i class="fa-solid ${icon} text-amber-500 shrink-0"></i><span class="truncate">${name}</span></span>
+                        <span class="font-bold text-slate-800 shrink-0">${price === 0 ? 'Free' : `$${price.toFixed(2)} ${cur}`}</span>
+                    </div>
+                    ${note ? `<p class="text-[10px] text-gray-400 mt-0.5 leading-tight">${note}</p>` : ''}
+                </div>`;
+
+            let html = '';
+            road.forEach(t => { usd += t.price; html += row('fa-road-barrier', t.name, t.price, t.cur, t.note); });
+            FIXED_FEES.forEach(f => {
+                if (f.cur === 'USD') usd += f.price; else cad += f.price;
+                html += row(f.icon, f.name, f.price, f.cur, '');
+            });
+
+            const cadTotal = fxUsdToCad ? (usd * fxUsdToCad + cad) : null;
+            html += `
+                <div class="flex items-center justify-between pt-1.5 px-1 font-extrabold text-slate-800">
+                    <span>Total tolls &amp; fees</span>
+                    <span>$${usd.toFixed(2)} USD + $${cad.toFixed(2)} CAD${cadTotal ? ` <span class="text-gray-400 font-semibold">(≈$${cadTotal.toFixed(0)} CAD)</span>` : ''}</span>
+                </div>`;
+            el.innerHTML = html;
+        }
+
+        // =====================================================================
+        //  FUEL ESTIMATOR
+        // =====================================================================
+        const fuelPriceEl = document.getElementById('fuel-price');
+        const fuelConsEl = document.getElementById('fuel-cons');
+        fuelPriceEl.value = localStorage.getItem('fuelPrice') || '1.30';
+        fuelConsEl.value = localStorage.getItem('fuelCons') || '8.5';
+
+        function renderFuel() {
+            const price = parseFloat(fuelPriceEl.value) || 0;
+            const cons = parseFloat(fuelConsEl.value) || 0;
+            const driveKm = legBounds.filter(b => b.mode === 'drive')
+                                     .reduce((s, b) => s + (b.endCum - b.startCum), 0);
+            const litres = driveKm * cons / 100;
+            const cost = litres * price;
+            document.getElementById('fuel-result').innerHTML =
+                `${Math.round(driveKm).toLocaleString()} km driven · ${Math.round(litres)} L · <span class="text-emerald-700">≈ $${cost.toFixed(0)}</span>`;
+        }
+        fuelPriceEl.addEventListener('input', () => { localStorage.setItem('fuelPrice', fuelPriceEl.value); renderFuel(); });
+        fuelConsEl.addEventListener('input', () => { localStorage.setItem('fuelCons', fuelConsEl.value); renderFuel(); });
+
+        // =====================================================================
+        //  LIVE FX RATE — open.er-api.com (free, no API key)
+        // =====================================================================
+        async function loadFx() {
+            try {
+                const res = await fetch('https://open.er-api.com/v6/latest/USD');
+                const data = await res.json();
+                if (data && data.rates && data.rates.CAD) {
+                    fxUsdToCad = data.rates.CAD;
+                    document.getElementById('fx-text').textContent = `1 USD ≈ ${fxUsdToCad.toFixed(2)} CAD`;
+                    document.getElementById('chip-fx').classList.remove('hidden');
+                    renderTolls();
+                }
+            } catch (e) { console.warn('FX unavailable:', e.message); }
+        }
+
+        // =====================================================================
+        //  Route drawing (re-runs whenever an alternate route is chosen)
+        // =====================================================================
         let routePts = [];       // [ [lat,lng], ... ]
         let routeCum = [0];      // cumulative km at each point
         let legBounds = [];      // { startCum, endCum, mode } per leg
         let stopHits = [];       // { dist, stopId } where the trip pauses to sleep
         let totalDist = 0;
-        let routeLine = null;    // the flowing top line (used for fitBounds)
+        const routeLayer = L.layerGroup().addTo(map);
 
-        function buildAndDrawRoute() {
+        function buildAndDrawRoute(fit = true) {
+            routeLayer.clearLayers();
+
             // Draw each leg as a glow underlay + animated flowing line
             legs.forEach(leg => {
                 const isFerry = leg.mode === 'ferry';
-                // glow underlay
                 L.polyline(leg.points, {
                     color: isFerry ? '#93c5fd' : '#3b82f6',
                     weight: isFerry ? 6 : 9, opacity: 0.18, lineJoin: 'round', className: 'route-glow'
-                }).addTo(map);
-                // animated flowing line
-                const line = L.polyline(leg.points, {
+                }).addTo(routeLayer);
+                L.polyline(leg.points, {
                     color: isFerry ? '#60a5fa' : '#2563eb',
                     weight: isFerry ? 3 : 4, opacity: 0.95, lineJoin: 'round', lineCap: 'round',
                     className: isFerry ? 'route-ferry' : 'route-drive'
-                }).addTo(map);
-                routeLine = line;
+                }).addTo(routeLayer);
             });
 
             // Build flattened path + cumulative distances + leg bounds
@@ -508,9 +974,8 @@
             });
             totalDist = routeCum[routeCum.length - 1];
 
-            // Build a combined bounds object for fit
             const fullBounds = L.latLngBounds(routePts);
-            map.fitBounds(fullBounds, { padding: [50, 50] });
+            if (fit) map.fitBounds(fullBounds, { padding: [50, 50] });
             window._routeBounds = fullBounds;
 
             // Hide loader, enable play
@@ -518,14 +983,122 @@
             loader.style.opacity = '0';
             setTimeout(() => loader.classList.add('hidden'), 500);
             btnPlay.disabled = false;
+
+            // Update everything that depends on the chosen route
+            document.getElementById('chip-distance').innerHTML =
+                `<i class="fa-solid fa-route text-emerald-300"></i> ~${Math.round(totalDist).toLocaleString()} km`;
+            renderRoutePanel();
+            renderTolls();
+            renderFuel();
         }
+
+        // ---- Route options panel ----
+        function fmtHrs(h) {
+            const hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+            return `${hh}h ${String(mm).padStart(2, '0')}m`;
+        }
+
+        function renderRoutePanel() {
+            const el = document.getElementById('route-legs');
+            el.innerHTML = Object.entries(SWITCHABLE).map(([id, cfg]) => {
+                const leg = legs.find(l => l.switchId === id);
+                const cur = routeModes[id];
+                const btn = (mode, label, data) => `
+                    <button onclick="setRouteMode('${id}', '${mode}')"
+                        class="flex-1 rounded-lg px-2 py-1.5 text-left transition-all border ${cur === mode
+                            ? 'bg-trip-accent text-white border-trip-accent shadow'
+                            : 'bg-white/80 text-gray-600 border-gray-200 hover:border-trip-accent/50'}">
+                        <span class="block font-bold text-[11px] leading-tight">${mode === 'scenic' ? '🌊 ' : '⚡ '}${label}</span>
+                        ${data ? `<span class="block text-[10px] ${cur === mode ? 'text-blue-100' : 'text-gray-400'}">${Math.round(data.km)} km · ${fmtHrs(data.hrs)}</span>` : ''}
+                    </button>`;
+                return `
+                    <div>
+                        <p class="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-1">${cfg.label}</p>
+                        <div class="flex gap-1.5">
+                            ${btn('scenic', cfg.scenic, leg && leg.opts.scenic)}
+                            ${btn('fast', cfg.fast, leg && leg.opts.fast)}
+                        </div>
+                    </div>`;
+            }).join('');
+
+            // total drive time across all legs with OSRM data
+            let driveHrs = 0, haveAll = true;
+            legs.forEach(l => {
+                if (l.mode !== 'drive') return;
+                const o = l.switchId ? l.opts[routeModes[l.switchId]] : l.opts.fast;
+                if (o) driveHrs += o.hrs; else haveAll = false;
+            });
+            document.getElementById('route-summary').innerHTML = `
+                <div class="flex items-center justify-between"><span><i class="fa-solid fa-route text-trip-accent mr-1"></i>Total route</span><strong>${Math.round(totalDist).toLocaleString()} km</strong></div>
+                ${haveAll ? `<div class="flex items-center justify-between mt-1"><span><i class="fa-solid fa-clock text-trip-accent mr-1"></i>Total driving time</span><strong>${fmtHrs(driveHrs)}</strong></div>` : ''}
+                <div class="flex items-center justify-between mt-1"><span><i class="fa-solid fa-ship text-blue-400 mr-1"></i>Ferry crossings</span><strong>2 × ~1h 35m</strong></div>`;
+        }
+
+        function setRouteMode(switchId, mode) {
+            if (routeModes[switchId] === mode) return;
+            if (isPlaying) stopAnimation();
+            routeModes[switchId] = mode;
+            localStorage.setItem('routeModes', JSON.stringify(routeModes));
+            const leg = legs.find(l => l.switchId === switchId);
+            if (leg && leg.opts[mode]) leg.points = leg.opts[mode].points;
+            buildAndDrawRoute(false);
+        }
+
+        document.getElementById('btn-route-panel').addEventListener('click', () =>
+            document.getElementById('route-panel').classList.toggle('hidden'));
+        document.getElementById('btn-close-route-panel').addEventListener('click', () =>
+            document.getElementById('route-panel').classList.add('hidden'));
 
         // Kick off routing
         const btnPlay = document.getElementById('btn-play-anim');
         const btnStop = document.getElementById('btn-stop-anim');
         btnPlay.disabled = true;
 
-        Promise.all(legs.map(fetchLeg)).then(buildAndDrawRoute);
+        Promise.all(legs.map(fetchLeg)).then(() => buildAndDrawRoute(true));
+
+        // =====================================================================
+        //  CALENDAR EXPORT (.ics) — import the whole trip into any calendar
+        // =====================================================================
+        function exportICS() {
+            const pad = s => String(s).replace(/-/g, '');
+            let ics = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//WestCoastTrip//EN\r\n';
+            itineraryData.forEach(stop => {
+                const ci = stopCheckin(stop);
+                const co = addDays(ci, Math.max(stop.nights, 1));
+                ics += 'BEGIN:VEVENT\r\n' +
+                       `UID:${stop.id}@westcoast-trip\r\n` +
+                       `DTSTART;VALUE=DATE:${pad(toISO(ci))}\r\n` +
+                       `DTEND;VALUE=DATE:${pad(toISO(co))}\r\n` +
+                       `SUMMARY:${stop.day}: ${stop.title}\r\n` +
+                       `LOCATION:${stop.location}\r\n` +
+                       `DESCRIPTION:${stop.desc.replace(/,/g, '\\,')} \\nStay: ${stop.hotel.replace(/,/g, '\\,')} \\nTransit: ${stop.transit.replace(/,/g, '\\,')}\r\n` +
+                       'END:VEVENT\r\n';
+            });
+            ics += 'END:VCALENDAR\r\n';
+            const blob = new Blob([ics], { type: 'text/calendar' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `west-coast-trip-${toISO(getStartDate())}.ics`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+        document.getElementById('btn-export-ics').addEventListener('click', exportICS);
+
+        // =====================================================================
+        //  START DATE wiring
+        // =====================================================================
+        const startDateInput = document.getElementById('start-date');
+        startDateInput.value = toISO(getStartDate());
+        startDateInput.addEventListener('change', () => {
+            if (!startDateInput.value) return;
+            localStorage.setItem('tripStartDate', startDateInput.value);
+            renderStopDates();
+            loadAllWeather();
+        });
+
+        renderStopDates();
+        loadAllWeather();
+        loadFx();
 
         // =====================================================================
         //  Focus / navigation
