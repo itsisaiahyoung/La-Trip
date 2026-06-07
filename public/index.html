@@ -176,6 +176,12 @@
                     <button id="btn-export-ics" class="glass !bg-white/10 hover:!bg-white/20 px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium transition-colors" title="Download itinerary as a calendar (.ics) file">
                         <i class="fa-solid fa-calendar-plus text-emerald-300"></i> Calendar
                     </button>
+                    <button id="btn-share" class="glass !bg-white/10 hover:!bg-white/20 px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium transition-colors" title="Copy an invite link — anyone with the link plans this trip live with you">
+                        <i class="fa-solid fa-user-group text-blue-300"></i> <span id="share-text">Invite friend</span>
+                    </button>
+                    <span id="sync-chip" class="glass !bg-white/10 px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium" title="Realtime sync via Firebase">
+                        <span id="sync-dot" class="w-2 h-2 rounded-full bg-gray-400"></span><span id="sync-text">Connecting…</span>
+                    </span>
                 </div>
             </div>
         </div>
@@ -484,12 +490,20 @@
                             </div>
                             <div class="flex items-start gap-2 text-sm">
                                 <i class="fa-solid fa-bed text-trip-highlight mt-0.5 w-4 text-center"></i>
-                                <span class="text-gray-700 leading-tight"><strong>Stay:</strong> ${stop.hotel}</span>
+                                <span class="text-gray-700 leading-tight"><strong>Stay:</strong> <span id="stay-${stop.id}">${stop.hotel}</span></span>
                             </div>
                             ${stop.hotelSearch ? `
                             <button onclick="event.stopPropagation(); openHotelModal('${stop.id}')" class="w-full mt-1 bg-trip-accent/10 hover:bg-trip-accent hover:text-white text-trip-accent text-xs font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5">
-                                <i class="fa-solid fa-magnifying-glass"></i> Check hotel availability
+                                <i class="fa-solid fa-magnifying-glass"></i> Check &amp; pick hotels
                             </button>` : ''}
+                            <div class="mt-1" onclick="event.stopPropagation()">
+                                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                                    <i class="fa-solid fa-note-sticky text-amber-400"></i> Shared notes
+                                </label>
+                                <textarea id="note-${stop.id}" rows="2" placeholder="Add a note — your friend sees it live…"
+                                    oninput="onNoteInput('${stop.id}')"
+                                    class="w-full mt-1 text-xs border border-gray-200 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-trip-accent resize-y bg-white"></textarea>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -654,7 +668,10 @@
                 </a>
                 <a href="${bookingUrl(stop.hotel, ci, co)}" target="_blank" rel="noopener" class="bg-emerald-500/90 text-white font-bold px-3 py-1.5 rounded-full hover:bg-emerald-400 transition-colors flex items-center gap-1.5">
                     <i class="fa-solid fa-bed"></i> Planned: ${stop.hotel.split(',')[0]}
-                </a>`;
+                </a>
+                <button onclick="pickPlannedHotel('${stop.id}')" class="bg-white/15 text-white font-bold px-3 py-1.5 rounded-full hover:bg-white/25 transition-colors flex items-center gap-1.5" title="Reset to the originally planned hotel">
+                    <i class="fa-solid fa-rotate-left"></i> Use planned
+                </button>`;
 
             const results = document.getElementById('hotel-results');
             results.innerHTML = `
@@ -693,17 +710,25 @@
                     return;
                 }
 
-                results.innerHTML = `<p class="text-[11px] text-gray-400 font-semibold uppercase tracking-wide px-1">${hotels.length} hotels nearby (OpenStreetMap) — tap to check availability for your dates</p>` +
-                    hotels.map(h => `
-                        <div class="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3 hover:shadow-md transition-shadow">
-                            <div class="w-9 h-9 rounded-lg bg-trip-accent/10 text-trip-accent flex items-center justify-center shrink-0">
-                                <i class="fa-solid fa-hotel"></i>
+                window._modalHotels = hotels;
+                window._modalStopId = stop.id;
+                results.innerHTML = `<p class="text-[11px] text-gray-400 font-semibold uppercase tracking-wide px-1">${hotels.length} hotels nearby (OpenStreetMap) — check availability, then pick one together</p>` +
+                    hotels.map((h, i) => {
+                        const picked = selectedHotels[stop.id] && selectedHotels[stop.id].name === h.name;
+                        return `
+                        <div class="bg-white rounded-xl border ${picked ? 'border-emerald-400 ring-1 ring-emerald-300' : 'border-gray-200'} p-3 flex items-center gap-3 hover:shadow-md transition-shadow">
+                            <div class="w-9 h-9 rounded-lg ${picked ? 'bg-emerald-100 text-emerald-600' : 'bg-trip-accent/10 text-trip-accent'} flex items-center justify-center shrink-0">
+                                <i class="fa-solid ${picked ? 'fa-circle-check' : 'fa-hotel'}"></i>
                             </div>
                             <div class="flex-1 min-w-0">
                                 <p class="font-bold text-sm text-slate-800 truncate">${h.name}</p>
                                 <p class="text-[11px] text-gray-500">${h.stars ? '★'.repeat(Math.min(5, Math.round(parseFloat(h.stars)))) + ' · ' : ''}${(getDistance(stop.coords, [h.lat, h.lng])).toFixed(1)} km away</p>
                             </div>
                             <div class="flex gap-1.5 shrink-0">
+                                <button onclick="event.stopPropagation(); pickHotelIdx(${i})"
+                                   class="${picked ? 'bg-emerald-500 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-500 hover:text-white'} text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-colors" title="Pick this hotel for this stop (synced with your friend)">
+                                    ${picked ? '<i class="fa-solid fa-check"></i> Picked' : 'Pick'}
+                                </button>
                                 <a href="${bookingUrl(h.name + ', ' + stop.hotelSearch, ci, co)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
                                    class="bg-trip-accent text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-blue-600 transition-colors" title="Check availability on Booking.com">
                                     Avail.
@@ -713,7 +738,7 @@
                                     <i class="fa-solid fa-map-location-dot"></i>
                                 </a>
                             </div>
-                        </div>`).join('');
+                        </div>`; }).join('');
             } catch (e) {
                 results.innerHTML = `<p class="text-center text-sm text-gray-500 py-8">Couldn't load nearby hotels (${e.message}).<br>Use the Booking / Expedia / Google links above — your dates are already filled in.</p>`;
             }
@@ -901,8 +926,8 @@
             document.getElementById('fuel-result').innerHTML =
                 `${Math.round(driveKm).toLocaleString()} km driven · ${Math.round(litres)} L · <span class="text-emerald-700">≈ $${cost.toFixed(0)}</span>`;
         }
-        fuelPriceEl.addEventListener('input', () => { localStorage.setItem('fuelPrice', fuelPriceEl.value); renderFuel(); });
-        fuelConsEl.addEventListener('input', () => { localStorage.setItem('fuelCons', fuelConsEl.value); renderFuel(); });
+        fuelPriceEl.addEventListener('input', () => { localStorage.setItem('fuelPrice', fuelPriceEl.value); renderFuel(); pushTrip({ fuelPrice: fuelPriceEl.value }); });
+        fuelConsEl.addEventListener('input', () => { localStorage.setItem('fuelCons', fuelConsEl.value); renderFuel(); pushTrip({ fuelCons: fuelConsEl.value }); });
 
         // =====================================================================
         //  LIVE FX RATE — open.er-api.com (free, no API key)
@@ -1042,6 +1067,7 @@
             const leg = legs.find(l => l.switchId === switchId);
             if (leg && leg.opts[mode]) leg.points = leg.opts[mode].points;
             buildAndDrawRoute(false);
+            pushTrip({ routeModes });
         }
 
         document.getElementById('btn-route-panel').addEventListener('click', () =>
@@ -1094,6 +1120,7 @@
             localStorage.setItem('tripStartDate', startDateInput.value);
             renderStopDates();
             loadAllWeather();
+            pushTrip({ startDate: startDateInput.value });
         });
 
         renderStopDates();
@@ -1294,6 +1321,200 @@
 
         btnPlay.addEventListener('click', startAnimation);
         btnStop.addEventListener('click', stopAnimation);
+
+        // =====================================================================
+        //  REALTIME COLLABORATION — shared trip state via Firestore.
+        //  The Firebase module script below provides window.tripSync; this
+        //  section pushes local edits up and applies remote edits live.
+        // =====================================================================
+        let applyingRemote = false;     // guard: don't echo remote changes back
+        let selectedHotels = {};        // { stopId: { name } } picked together
+        const _noteTimers = {};
+
+        function pushTrip(partial) {
+            if (!applyingRemote && window.tripSync) window.tripSync.set(partial);
+        }
+
+        // Per-stop shared notes (debounced so we don't write on every keystroke)
+        function onNoteInput(stopId) {
+            const el = document.getElementById(`note-${stopId}`);
+            if (!el) return;
+            clearTimeout(_noteTimers[stopId]);
+            _noteTimers[stopId] = setTimeout(() => pushTrip({ notes: { [stopId]: el.value } }), 600);
+        }
+
+        // Hotel picks
+        function renderSelectedHotel(stopId) {
+            const stop = itineraryData.find(s => s.id === stopId);
+            const el = document.getElementById(`stay-${stopId}`);
+            if (!el || !stop) return;
+            const sel = selectedHotels[stopId];
+            el.innerHTML = (sel && sel.name && sel.name !== stop.hotel)
+                ? `${sel.name} <span class="text-emerald-600 font-bold text-[10px] whitespace-nowrap"><i class="fa-solid fa-circle-check"></i> picked together</span>`
+                : stop.hotel;
+        }
+        function pickHotel(stopId, name) {
+            selectedHotels[stopId] = { name };
+            renderSelectedHotel(stopId);
+            pushTrip({ hotels: { [stopId]: { name } } });
+        }
+        function pickHotelIdx(i) {
+            const h = (window._modalHotels || [])[i];
+            if (h && window._modalStopId) {
+                pickHotel(window._modalStopId, h.name);
+                openHotelModal(window._modalStopId); // re-render picked state
+            }
+        }
+        function pickPlannedHotel(stopId) {
+            const stop = itineraryData.find(s => s.id === stopId);
+            if (stop) pickHotel(stopId, stop.hotel);
+        }
+
+        // Apply a remote snapshot of the shared trip document
+        window.applyRemoteTrip = function (data) {
+            applyingRemote = true;
+            try {
+                if (data.startDate && data.startDate !== startDateInput.value) {
+                    localStorage.setItem('tripStartDate', data.startDate);
+                    startDateInput.value = data.startDate;
+                    renderStopDates();
+                    loadAllWeather();
+                }
+                if (data.routeModes) {
+                    let changed = false;
+                    Object.keys(SWITCHABLE).forEach(id => {
+                        const m = data.routeModes[id];
+                        if ((m === 'scenic' || m === 'fast') && m !== routeModes[id]) {
+                            routeModes[id] = m;
+                            const leg = legs.find(l => l.switchId === id);
+                            if (leg && leg.opts[m]) leg.points = leg.opts[m].points;
+                            changed = true;
+                        }
+                    });
+                    if (changed) {
+                        localStorage.setItem('routeModes', JSON.stringify(routeModes));
+                        if (routePts.length) {
+                            if (isPlaying) stopAnimation();
+                            buildAndDrawRoute(false);
+                        }
+                    }
+                }
+                if (data.fuelPrice !== undefined && String(data.fuelPrice) !== fuelPriceEl.value) {
+                    fuelPriceEl.value = data.fuelPrice;
+                    localStorage.setItem('fuelPrice', fuelPriceEl.value);
+                    renderFuel();
+                }
+                if (data.fuelCons !== undefined && String(data.fuelCons) !== fuelConsEl.value) {
+                    fuelConsEl.value = data.fuelCons;
+                    localStorage.setItem('fuelCons', fuelConsEl.value);
+                    renderFuel();
+                }
+                if (data.notes) {
+                    Object.entries(data.notes).forEach(([id, txt]) => {
+                        const el = document.getElementById(`note-${id}`);
+                        // don't clobber a note your friend is mid-typing in THIS tab
+                        if (el && document.activeElement !== el && el.value !== txt) el.value = txt;
+                    });
+                }
+                if (data.hotels) {
+                    selectedHotels = data.hotels;
+                    itineraryData.forEach(s => renderSelectedHotel(s.id));
+                }
+            } finally {
+                applyingRemote = false;
+            }
+        };
+    </script>
+
+    <!-- ============ Firebase: anonymous auth + realtime Firestore sync ============ -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBmdkZKh4oCdH4Ut6Qtfsnjqx4vEdODmW8",
+            authDomain: "la-trip-5e116.firebaseapp.com",
+            projectId: "la-trip-5e116",
+            storageBucket: "la-trip-5e116.firebasestorage.app",
+            messagingSenderId: "727675172834",
+            appId: "1:727675172834:web:7b9952df6c2dec3434ebbb",
+            measurementId: "G-FVPYWBTPY4"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // ---- Trip identity: unguessable id shared by link ----
+        function getTripId() {
+            const url = new URL(location.href);
+            let id = url.searchParams.get('trip');
+            if (id && /^[A-Za-z0-9_-]{20,64}$/.test(id)) {
+                localStorage.setItem('tripId', id);
+                return id;
+            }
+            id = localStorage.getItem('tripId');
+            if (!id) {
+                id = crypto.randomUUID().replace(/-/g, ''); // 32-char hex
+                localStorage.setItem('tripId', id);
+            }
+            url.searchParams.set('trip', id);
+            history.replaceState(null, '', url);
+            return id;
+        }
+        const tripId = getTripId();
+
+        // ---- Sync status chip ----
+        const dot = document.getElementById('sync-dot');
+        const txt = document.getElementById('sync-text');
+        function setStatus(color, text) {
+            dot.className = `w-2 h-2 rounded-full ${color}`;
+            txt.textContent = text;
+        }
+
+        // Queue writes made before auth/Firestore are ready
+        const pending = [];
+        window.tripSync = { set(p) { pending.push(p); } };
+
+        signInAnonymously(auth).catch(e => {
+            console.warn('Anonymous sign-in failed:', e.message);
+            setStatus('bg-red-400', 'Offline');
+        });
+
+        onAuthStateChanged(auth, user => {
+            if (!user) return;
+            const ref = doc(db, 'trips', tripId);
+
+            const push = data =>
+                setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true })
+                    .catch(err => { console.warn('Sync write failed:', err.message); setStatus('bg-red-400', 'Sync error'); });
+
+            window.tripSync = { set: push };
+            pending.splice(0).forEach(push);
+
+            onSnapshot(ref, snap => {
+                setStatus('bg-emerald-400', 'Live sync');
+                if (snap.metadata.hasPendingWrites) return; // our own write echoing back
+                if (snap.exists() && window.applyRemoteTrip) window.applyRemoteTrip(snap.data());
+            }, err => {
+                console.warn('Sync listen failed:', err.message);
+                setStatus('bg-red-400', 'Sync error');
+            });
+        });
+
+        // ---- Invite link ----
+        document.getElementById('btn-share').addEventListener('click', async () => {
+            const url = `${location.origin}${location.pathname}?trip=${tripId}`;
+            const label = document.getElementById('share-text');
+            try {
+                await navigator.clipboard.writeText(url);
+                label.textContent = 'Link copied!';
+                setTimeout(() => label.textContent = 'Invite friend', 2000);
+            } catch {
+                prompt('Copy this invite link:', url);
+            }
+        });
     </script>
 </body>
 </html>

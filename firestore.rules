@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Shared trip documents. A trip is accessed via an unguessable id that is
+    // shared by link between the two collaborators ("anyone with the link").
+    // Listing the collection is forbidden, so trips can only be reached by
+    // knowing their full id.
+    match /trips/{tripId} {
+
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Trip ids are client-generated 32-char random hex strings.
+      function validTripId() {
+        return tripId.size() >= 20 && tripId.size() <= 64;
+      }
+
+      function data() {
+        return request.resource.data;
+      }
+
+      // The itinerary's stop ids are fixed in the app.
+      function stopKeys() {
+        return ['stop-1', 'stop-2', 'stop-3', 'stop-4', 'stop-5', 'stop-6', 'stop-7', 'stop-8'];
+      }
+
+      // Per-stop note: optional string, capped to keep the doc small.
+      function validNote(k) {
+        return !(k in data().notes) || (data().notes[k] is string && data().notes[k].size() <= 2000);
+      }
+      function validNotes() {
+        return data().notes is map && data().notes.keys().hasOnly(stopKeys())
+          && validNote('stop-1') && validNote('stop-2') && validNote('stop-3') && validNote('stop-4')
+          && validNote('stop-5') && validNote('stop-6') && validNote('stop-7') && validNote('stop-8');
+      }
+
+      // Per-stop hotel pick: optional { name: string }.
+      function validHotel(k) {
+        return !(k in data().hotels)
+          || (data().hotels[k] is map
+              && data().hotels[k].keys().hasOnly(['name'])
+              && data().hotels[k].name is string
+              && data().hotels[k].name.size() <= 200);
+      }
+      function validHotels() {
+        return data().hotels is map && data().hotels.keys().hasOnly(stopKeys())
+          && validHotel('stop-1') && validHotel('stop-2') && validHotel('stop-3') && validHotel('stop-4')
+          && validHotel('stop-5') && validHotel('stop-6') && validHotel('stop-7') && validHotel('stop-8');
+      }
+
+      // Per-leg route choice: optional 'scenic' | 'fast' for switchable legs.
+      function validRouteMode(k) {
+        return !(k in data().routeModes) || data().routeModes[k] in ['scenic', 'fast'];
+      }
+      function validRouteModes() {
+        return data().routeModes is map
+          && data().routeModes.keys().hasOnly(['stop-2', 'stop-3', 'stop-4'])
+          && validRouteMode('stop-2') && validRouteMode('stop-3') && validRouteMode('stop-4');
+      }
+
+      // Only the fields the app writes, with strict types and size limits.
+      function validTripData() {
+        return data().keys().hasOnly(['startDate', 'routeModes', 'notes', 'hotels', 'fuelPrice', 'fuelCons', 'updatedAt'])
+          && (!('startDate' in data()) || (data().startDate is string && data().startDate.size() == 10))
+          && (!('routeModes' in data()) || validRouteModes())
+          && (!('notes' in data()) || validNotes())
+          && (!('hotels' in data()) || validHotels())
+          && (!('fuelPrice' in data()) || (data().fuelPrice is string && data().fuelPrice.size() <= 12))
+          && (!('fuelCons' in data()) || (data().fuelCons is string && data().fuelCons.size() <= 12))
+          && (!('updatedAt' in data()) || data().updatedAt is timestamp);
+      }
+
+      allow get: if isSignedIn() && validTripId();
+      allow list: if false;
+      allow create, update: if isSignedIn() && validTripId() && validTripData();
+      allow delete: if false;
+    }
+
+    // Everything else is locked down.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
