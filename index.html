@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>West Coast 2-Week Roadtrip</title>
+
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Leaflet CSS for Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        trip: {
+                            dark: '#0f172a',
+                            accent: '#3b82f6',
+                            highlight: '#10b981',
+                            card: '#ffffff'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Leaflet popup customization */
+        .leaflet-popup-content-wrapper {
+            border-radius: 0.85rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.08);
+        }
+        .leaflet-popup-content {
+            margin: 16px;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* ---- Route line styling & flow animation ---- */
+        @keyframes routeFlow { to { stroke-dashoffset: -36; } }
+        .route-drive {
+            stroke-dasharray: 14 12;
+            animation: routeFlow 1.1s linear infinite;
+            filter: drop-shadow(0 0 3px rgba(59,130,246,0.45));
+        }
+        .route-ferry {
+            stroke-dasharray: 2 11;
+            animation: routeFlow 1.1s linear infinite;
+        }
+        .route-glow { transition: opacity 1s ease; }
+
+        /* ---- Map markers ---- */
+        @keyframes markerDrop {
+            0%   { transform: translateY(-26px) scale(0.4); opacity: 0; }
+            60%  { transform: translateY(4px)   scale(1.05); opacity: 1; }
+            100% { transform: translateY(0)     scale(1); opacity: 1; }
+        }
+        .custom-marker {
+            display: flex; align-items: center; justify-content: center;
+            background-color: #3b82f6; color: white;
+            border-radius: 50%; border: 2px solid white;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+            font-weight: 700; font-size: 14px;
+            animation: markerDrop 0.55s cubic-bezier(.34,1.56,.64,1) backwards;
+        }
+        .custom-marker.park { background-color: #10b981; }
+        .custom-marker.city, .custom-marker.end { background-color: #f59e0b; }
+        .custom-marker.start { background-color: #6366f1; }
+        .custom-icon:hover .custom-marker { transform: scale(1.18); z-index: 1000; transition: transform .2s; }
+
+        /* Pulsing ring behind the active marker */
+        @keyframes pulseRing {
+            0%   { transform: scale(0.8); opacity: 0.7; }
+            100% { transform: scale(2.4); opacity: 0; }
+        }
+        .marker-pulse {
+            position: absolute; inset: 0; border-radius: 50%;
+            background: rgba(59,130,246,0.5);
+            animation: pulseRing 1.6s ease-out infinite;
+        }
+
+        /* Animated vehicle marker */
+        .anim-icon { transition: transform 0.12s linear; will-change: transform; }
+        .anim-popup .leaflet-popup-content-wrapper { background: #1e293b; color: white; }
+        .anim-popup .leaflet-popup-tip { background: #1e293b; }
+        .anim-popup .leaflet-popup-content { margin: 12px; }
+
+        /* ---- Sidebar card reveal animation ---- */
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .card-reveal { animation: cardIn 0.5s ease both; }
+
+        /* ---- Loading overlay ---- */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .route-spinner {
+            width: 38px; height: 38px; border-radius: 50%;
+            border: 4px solid rgba(59,130,246,0.25);
+            border-top-color: #3b82f6;
+            animation: spin 0.8s linear infinite;
+        }
+        #map { width: 100%; height: 100%; z-index: 10; }
+
+        .glass {
+            background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col md:flex-row h-screen overflow-hidden text-gray-800">
+
+    <aside class="w-full md:w-1/3 lg:w-[400px] bg-white h-[50vh] md:h-screen flex flex-col shadow-xl z-20 relative">
+        <div class="relative text-white p-6 shrink-0 overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900">
+            <div class="absolute -right-8 -top-10 w-40 h-40 bg-blue-500/20 rounded-full blur-2xl"></div>
+            <div class="absolute -left-6 bottom-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl"></div>
+            <div class="relative">
+                <p class="text-blue-300 text-xs font-semibold tracking-[0.2em] uppercase mb-1">Pacific Coast Loop</p>
+                <h1 class="text-2xl font-extrabold mb-3 leading-tight">West Coast Round Trip</h1>
+                <div class="flex flex-wrap gap-2 text-xs">
+                    <span class="glass !bg-white/10 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium">
+                        <i class="fa-solid fa-calendar-days text-blue-300"></i> 14 Days
+                    </span>
+                    <span class="glass !bg-white/10 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium">
+                        <i class="fa-solid fa-route text-emerald-300"></i> ~4,800 km
+                    </span>
+                    <span class="glass !bg-white/10 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium">
+                        <i class="fa-solid fa-location-dot text-amber-300"></i> 8 Stops
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <div id="itinerary-list" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 pb-20 md:pb-4">
+            <!-- Cards injected via JS -->
+        </div>
+
+        <div class="md:hidden absolute bottom-4 left-1/2 -translate-x-1/2 w-[90%]">
+            <button onclick="document.getElementById('map-container').scrollIntoView({behavior: 'smooth'})" class="w-full bg-trip-accent text-white py-3 rounded-full font-semibold shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
+                <i class="fa-solid fa-map-location-dot"></i> View Full Map
+            </button>
+        </div>
+    </aside>
+
+    <main id="map-container" class="w-full md:flex-1 h-[50vh] md:h-screen relative bg-gray-200">
+        <div id="map"></div>
+
+        <!-- Loading overlay while roads are plotted -->
+        <div id="route-loader" class="absolute inset-0 z-[500] flex flex-col items-center justify-center gap-3 bg-white/70 backdrop-blur-sm transition-opacity duration-500">
+            <div class="route-spinner"></div>
+            <p class="text-sm font-semibold text-slate-600">Plotting your route along real roads…</p>
+        </div>
+
+        <button id="btn-fit-bounds" class="absolute top-4 right-4 z-[400] glass p-3 rounded-xl shadow-md text-gray-700 hover:text-trip-accent transition-colors" title="Show Full Route">
+            <i class="fa-solid fa-expand"></i>
+        </button>
+
+        <!-- Animation progress bar -->
+        <div id="anim-progress-wrap" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-[400] w-[80%] max-w-md glass rounded-full p-1 shadow-lg">
+            <div class="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                <div id="anim-progress" class="h-full w-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-[width] duration-100"></div>
+            </div>
+        </div>
+
+        <!-- Animation Controls -->
+        <button id="btn-play-anim" class="absolute bottom-8 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-8 z-[400] bg-trip-accent text-white px-6 py-3 rounded-full shadow-2xl hover:bg-blue-600 transition-all transform hover:scale-105 font-bold flex items-center gap-2 border-2 border-white disabled:opacity-50 disabled:cursor-wait">
+            <i class="fa-solid fa-play"></i> Play Trip Animation
+        </button>
+        <button id="btn-stop-anim" class="hidden absolute bottom-8 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-8 z-[400] bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl hover:bg-red-600 transition-all transform hover:scale-105 font-bold flex items-center gap-2 border-2 border-white">
+            <i class="fa-solid fa-stop"></i> Stop Trip
+        </button>
+    </main>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+    <script>
+        // Definitive Route Coordinates (including ports)
+        const C_SIDNEY = [48.6483, -123.3980];
+        const C_SWARTZ = [48.6883, -123.4102];
+        const C_TSAW   = [49.0084, -123.1281];
+        const C_SEATTLE= [47.6062, -122.3321];
+        const C_REDWOOD= [41.2132, -124.0046];
+        const C_SF     = [37.7749, -122.4194];
+        const C_LA     = [34.0522, -118.2437];
+        const C_VEGAS  = [36.1699, -115.1398];
+        const C_YOSEM  = [37.8651, -119.5383];
+        const C_PORT   = [45.5152, -122.6784];
+
+        // Detailed ordered waypoints for the Animation Engine and Route Polyline
+        const routeWaypoints = [
+            { latlng: C_SIDNEY,  type: 'start', stopId: 'stop-1' }, // Day 1 Start
+            { latlng: C_SWARTZ,  type: 'port', name: 'Swartz Bay Port' },
+            { latlng: C_TSAW,    type: 'port', name: 'Tsawwassen Port', isFerryToHere: true },
+            { latlng: C_SEATTLE, type: 'stop', stopId: 'stop-1' }, // Night 1
+            { latlng: C_REDWOOD, type: 'stop', stopId: 'stop-2' }, // Night 2
+            { latlng: C_SF,      type: 'stop', stopId: 'stop-3' }, // Night 3-5
+            { latlng: C_LA,      type: 'stop', stopId: 'stop-4' }, // Night 6-9
+            { latlng: C_VEGAS,   type: 'stop', stopId: 'stop-5' }, // Night 10
+            { latlng: C_YOSEM,   type: 'stop', stopId: 'stop-6' }, // Night 11-12
+            { latlng: C_PORT,    type: 'stop', stopId: 'stop-7' }, // Night 13
+            { latlng: C_TSAW,    type: 'port', name: 'Tsawwassen Port' },
+            { latlng: C_SWARTZ,  type: 'port', name: 'Swartz Bay Port', isFerryToHere: true },
+            { latlng: C_SIDNEY,  type: 'stop', stopId: 'stop-8' }  // Day 14 Return
+        ];
+
+        const itineraryData = [
+            {
+                id: "stop-1", day: "Day 1", title: "Sidney, BC to Seattle, WA", location: "Washington, USA",
+                type: "start", coords: C_SEATTLE, icon: "fa-ferry",
+                desc: "Start your epic loop. Take the BC Ferry from Swartz Bay to Tsawwassen, cross the border, and drive down to Seattle.",
+                transit: "Ferry (1h 35m) + Drive (2h 30m)", hotel: "The Edgewater Hotel, Seattle",
+                image: "https://commons.wikimedia.org/wiki/Special:FilePath/Seattle_Kerry_Park_Skyline.jpg?width=1200"
+            },
+            {
+                id: "stop-2", day: "Day 2", title: "Redwood National Park", location: "Northern California",
+                type: "park", coords: C_REDWOOD, icon: "fa-tree",
+                desc: "A scenic driving day down the coast. Arrive at the Redwoods and marvel at the tallest trees on Earth.",
+                transit: "Drive: 7h 30m via US-101 & Oregon Coast (scenic)", hotel: "Elk Meadow Cabins, Orick",
+                image: "https://commons.wikimedia.org/wiki/Special:FilePath/Redwood_National_Park,_fog_in_the_forest.jpg?width=1200"
+            },
+            {
+                id: "stop-3", day: "Day 3-5", title: "San Francisco, CA", location: "Bay Area",
+                type: "city", coords: C_SF, icon: "fa-bridge-water",
+                desc: "Spend 3 full days exploring the Golden Gate Bridge, Alcatraz, Fisherman's Wharf, and the diverse neighborhoods of SF.",
+                transit: "Drive: 6h via Highway 1 (Mendocino Coast)", hotel: "Fairmont San Francisco",
+                image: "https://commons.wikimedia.org/wiki/Special:FilePath/Golden_Gate_Bridge_as_seen_from_Battery_East.jpg?width=1200"
+            },
+            {
+                id: "stop-4", day: "Day 6-9", title: "Los Angeles, CA", location: "Southern California",
+                type: "city", coords: C_LA, icon: "fa-star",
+                desc: "Enjoy 4 days in LA. Relax on Santa Monica beach, hike to the Hollywood sign, and soak in the SoCal sun.",
+                transit: "Drive: 9h via Highway 1 (Big Sur & PCH)", hotel: "Santa Monica Proper Hotel",
+                image: "https://commons.wikimedia.org/wiki/Special:FilePath/Echo_Park_Lake_with_Downtown_Los_Angeles_Skyline.jpg?width=1200"
+            },
+            {
+                id: "stop-5", day: "Day 10", title: "Las Vegas, NV", location: "Nevada",
+                type: "city", coords: C_VEGAS, icon: "fa-dice",
+                desc: "Head inland through the desert for a wild night experiencing the bright lights, shows, and casinos of the Vegas Strip.",
+                transit: "Drive: 4h 15m via I-15 N", hotel: "The Venetian Resort",
+                image: "https://commons.wikimedia.org/wiki/Special:FilePath/Las_Vegas_strip.jpg?width=1200"
+            },
+            {
+                id: "stop-6", day: "Day 11-12", title: "Yosemite National Park", location: "Sierra Nevada",
+                type: "park", coords: C_YOSEM, icon: "fa-mountain-sun",
+                desc: "Head back to nature. Spend 2 days hiking the valleys, seeing waterfalls, and witnessing the granite cliffs of El Capitan.",
+                transit: "Drive: 6h via US-95 & Tioga Pass (Summer)", hotel: "The Ahwahnee Hotel",
+                image: "https://commons.wikimedia.org/wiki/Special:FilePath/Tunnel_View,_Yosemite_Valley,_Yosemite_NP_-_Diliff.jpg?width=1200"
+            },
+            {
+                id: "stop-7", day: "Day 13", title: "Portland, OR", location: "Pacific Northwest",
+                type: "city", coords: C_PORT, icon: "fa-mug-hot",
+                desc: "The long haul north begins. Stop in Portland to stretch your legs, visit food trucks, and enjoy local artisan coffee.",
+                transit: "Drive: 10h 30m via I-5 N (Long drive)", hotel: "The Nines, a Luxury Collection Hotel",
+                image: "https://commons.wikimedia.org/wiki/Special:FilePath/Portland_Oregon_Aerial,_June_2025.jpg?width=1200"
+            },
+            {
+                id: "stop-8", day: "Day 14", title: "Sidney, BC, Canada", location: "Vancouver Island",
+                type: "end", coords: C_SIDNEY, icon: "fa-house",
+                desc: "Drive to Tsawwassen, catch the ferry back to Vancouver Island, and arrive home with incredible memories.",
+                transit: "Drive (5.5h) + Ferry to Swartz Bay (1.5h)", hotel: "Home Sweet Home",
+                image: "https://commons.wikimedia.org/wiki/Special:FilePath/British_Columbia_Parliament_Buildings.jpg?width=1200"
+            }
+        ];
+
+        const map = L.map('map', { zoomControl: false }).setView([42.5, -120], 5);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+            subdomains: 'abcd', maxZoom: 20
+        }).addTo(map);
+
+        const markers = {};
+        const listContainer = document.getElementById('itinerary-list');
+
+        // Gradient fallback image generator (themed by stop type) — replaces broken images gracefully
+        function fallbackImg(type, title) {
+            const colors = { start: '6366f1', stop: '3b82f6', park: '10b981', city: 'f59e0b', end: 'f59e0b' };
+            const c = colors[type] || '3b82f6';
+            return `https://placehold.co/800x400/${c}/ffffff?text=${encodeURIComponent(title)}`;
+        }
+
+        itineraryData.forEach((stop, index) => {
+            // UI Card Generation
+            const card = document.createElement('div');
+            card.className = `card-reveal bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group relative z-10`;
+            card.style.animationDelay = `${index * 70}ms`;
+            card.id = `card-${stop.id}`;
+            card.onclick = () => focusOnStop(stop.id);
+
+            let badgeClass = "bg-trip-accent";
+            if (stop.type === "park") badgeClass = "bg-trip-highlight";
+            if (stop.type === "city" || stop.type === "end") badgeClass = "bg-orange-500";
+
+            const fb = fallbackImg(stop.type, stop.title);
+
+            card.innerHTML = `
+                <div class="h-32 overflow-hidden relative">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent z-10"></div>
+                    <img src="${stop.image}" alt="${stop.title}" loading="lazy" onerror="this.onerror=null;this.src='${fb}';" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out">
+                    <div class="absolute top-2 left-2 z-20 ${badgeClass} text-white text-xs font-bold px-2.5 py-1 rounded-md shadow">${stop.day}</div>
+                    <div class="absolute bottom-2 left-3 z-20 text-white">
+                        <h3 class="font-bold text-base leading-tight drop-shadow-md">${stop.title}</h3>
+                        <p class="text-[11px] text-gray-200 font-medium uppercase tracking-wide drop-shadow">${stop.location}</p>
+                    </div>
+                </div>
+                <div class="p-4 flex gap-4">
+                    <div class="shrink-0 flex flex-col items-center">
+                        <div class="w-10 h-10 rounded-full ${badgeClass} text-white flex items-center justify-center shadow-inner z-10 relative">
+                            <i class="fa-solid ${stop.icon}"></i>
+                        </div>
+                        ${index !== itineraryData.length - 1 ? '<div class="w-0.5 h-full bg-gradient-to-b from-gray-300 to-gray-100 -mt-1 relative z-0"></div>' : ''}
+                    </div>
+                    <div class="pb-1 w-full">
+                        <p class="text-sm text-gray-600 mb-3">${stop.desc}</p>
+                        <div class="bg-gray-50 rounded-lg p-3 space-y-2 border border-gray-100">
+                            <div class="flex items-start gap-2 text-sm">
+                                <i class="fa-solid fa-route text-trip-accent mt-0.5 w-4 text-center"></i>
+                                <span class="text-gray-700 leading-tight"><strong>Transit:</strong> ${stop.transit}</span>
+                            </div>
+                            <div class="flex items-start gap-2 text-sm">
+                                <i class="fa-solid fa-bed text-trip-highlight mt-0.5 w-4 text-center"></i>
+                                <span class="text-gray-700 leading-tight"><strong>Stay:</strong> ${stop.hotel}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            listContainer.appendChild(card);
+
+            // Standard Map Marker Generation
+            const customIcon = L.divIcon({
+                className: 'custom-icon',
+                html: `<div class="custom-marker ${stop.type} w-8 h-8" style="animation-delay:${index * 70}ms">${index + 1}</div>`,
+                iconSize: [32, 32], iconAnchor: [16, 16], popupAnchor: [0, -16]
+            });
+
+            const marker = L.marker(stop.coords, { icon: customIcon }).addTo(map);
+
+            const popupContent = `
+                <div class="w-56">
+                    <img src="${stop.image}" onerror="this.onerror=null;this.src='${fb}';" class="w-full h-24 object-cover rounded-t-lg -mt-4 -mx-4 mb-3" style="width: calc(100% + 32px); max-width: none;">
+                    <span class="text-xs font-bold text-gray-500 uppercase">${stop.day}</span>
+                    <h3 class="font-bold text-lg leading-tight mb-2">${stop.title}</h3>
+                    <div class="text-xs text-gray-700 space-y-1 mb-1 border-t pt-2 mt-2 border-gray-100">
+                        <p><i class="fa-solid fa-route text-trip-accent w-3"></i> ${stop.transit}</p>
+                        <p><i class="fa-solid fa-bed text-trip-highlight w-3"></i> ${stop.hotel}</p>
+                    </div>
+                </div>
+            `;
+            marker.bindPopup(popupContent, { closeButton: false });
+            marker.on('click', () => focusOnStop(stop.id, false));
+            markers[stop.id] = marker;
+        });
+
+        // ---- Port dots ----
+        routeWaypoints.forEach(wp => {
+            if (wp.type === 'port') {
+                L.circleMarker(wp.latlng, {
+                    radius: 5, fillColor: '#cbd5e1', color: '#475569', weight: 2, fillOpacity: 1
+                }).bindTooltip(`<i class="fa-solid fa-anchor mr-1"></i> ${wp.name}`, {
+                    direction: 'right', className: 'text-xs font-bold rounded shadow-sm'
+                }).addTo(map);
+            }
+        });
+
+        // =====================================================================
+        //  ROAD-FOLLOWING ROUTE ENGINE
+        //  Build legs between consecutive waypoints, fetch real driving geometry
+        //  from OSRM (ferry legs stay as straight sea lines), then draw + animate.
+        // =====================================================================
+
+        // Haversine distance (km)
+        function getDistance(p1, p2) {
+            const R = 6371;
+            const dLat = (p2[0] - p1[0]) * Math.PI / 180;
+            const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+            const a = 0.5 - Math.cos(dLat)/2 + Math.cos(p1[0] * Math.PI / 180) * Math.cos(p2[0] * Math.PI / 180) * (1 - Math.cos(dLon))/2;
+            return R * 2 * Math.asin(Math.sqrt(a));
+        }
+
+        // Coastal "via" waypoints — force the SOUTHBOUND ("there") legs to hug the
+        // Pacific coast / Highway 1 instead of the faster inland I-5. The return
+        // (northbound) legs are left on the fast inland route so the loop varies.
+        // Keyed by the destination stop's id.
+        const COASTAL_VIA = {
+            'stop-2': [ // Seattle -> Redwoods, down the Oregon Coast (US-101)
+                [46.1879, -123.8313], // Astoria, OR
+                [44.6368, -124.0535], // Newport, OR
+                [43.3665, -124.2179], // Coos Bay, OR
+                [42.0526, -124.2840]  // Brookings, OR
+            ],
+            'stop-3': [ // Redwoods -> SF, the Mendocino Coast (Highway 1)
+                [40.8021, -124.1637], // Eureka
+                [39.4457, -123.8053], // Fort Bragg
+                [38.3330, -123.0481]  // Bodega Bay
+            ],
+            'stop-4': [ // SF -> LA, the classic PCH through Big Sur (Highway 1)
+                [36.9741, -122.0308], // Santa Cruz
+                [36.6002, -121.8947], // Monterey
+                [36.2704, -121.8081], // Big Sur
+                [35.6433, -121.1893], // San Simeon
+                [35.2828, -120.6596], // San Luis Obispo
+                [34.4208, -119.6982]  // Santa Barbara
+            ]
+        };
+
+        // Build legs
+        const legs = [];
+        for (let i = 0; i < routeWaypoints.length - 1; i++) {
+            const a = routeWaypoints[i], b = routeWaypoints[i + 1];
+            legs.push({
+                a, b,
+                mode: b.isFerryToHere ? 'ferry' : 'drive',
+                via: (b.stopId && COASTAL_VIA[b.stopId]) ? COASTAL_VIA[b.stopId] : [],
+                points: [a.latlng, b.latlng]   // straight-line fallback by default
+            });
+        }
+
+        // Fetch a single driving leg geometry from the public OSRM server
+        async function fetchLeg(leg) {
+            if (leg.mode === 'ferry') return; // ferries keep the straight sea line
+            // Build "lng,lat;lng,lat;..." with any coastal via points in between
+            const coords = [leg.a.latlng, ...leg.via, leg.b.latlng]
+                .map(([lat, lng]) => `${lng},${lat}`).join(';');
+            const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('OSRM ' + res.status);
+                const data = await res.json();
+                if (data.routes && data.routes[0]) {
+                    leg.points = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                }
+            } catch (e) {
+                // Network/CORS failure -> keep straight-line fallback so the map still works
+                console.warn('Routing fallback for a leg:', e.message);
+            }
+        }
+
+        // Flattened path data for the animation engine (built after drawing)
+        let routePts = [];       // [ [lat,lng], ... ]
+        let routeCum = [0];      // cumulative km at each point
+        let legBounds = [];      // { startCum, endCum, mode } per leg
+        let stopHits = [];       // { dist, stopId } where the trip pauses to sleep
+        let totalDist = 0;
+        let routeLine = null;    // the flowing top line (used for fitBounds)
+
+        function buildAndDrawRoute() {
+            // Draw each leg as a glow underlay + animated flowing line
+            legs.forEach(leg => {
+                const isFerry = leg.mode === 'ferry';
+                // glow underlay
+                L.polyline(leg.points, {
+                    color: isFerry ? '#93c5fd' : '#3b82f6',
+                    weight: isFerry ? 6 : 9, opacity: 0.18, lineJoin: 'round', className: 'route-glow'
+                }).addTo(map);
+                // animated flowing line
+                const line = L.polyline(leg.points, {
+                    color: isFerry ? '#60a5fa' : '#2563eb',
+                    weight: isFerry ? 3 : 4, opacity: 0.95, lineJoin: 'round', lineCap: 'round',
+                    className: isFerry ? 'route-ferry' : 'route-drive'
+                }).addTo(map);
+                routeLine = line;
+            });
+
+            // Build flattened path + cumulative distances + leg bounds
+            routePts = [];
+            routeCum = [0];
+            legBounds = [];
+            stopHits = [];
+
+            legs.forEach(leg => {
+                const startCum = routeCum[routeCum.length - 1] || 0;
+                leg.points.forEach(pt => {
+                    if (routePts.length === 0) {
+                        routePts.push(pt);
+                    } else {
+                        const prev = routePts[routePts.length - 1];
+                        if (pt[0] !== prev[0] || pt[1] !== prev[1]) {
+                            routePts.push(pt);
+                            routeCum.push(routeCum[routeCum.length - 1] + getDistance(prev, pt));
+                        }
+                    }
+                });
+                const endCum = routeCum[routeCum.length - 1];
+                legBounds.push({ startCum, endCum, mode: leg.mode });
+                if (leg.b.type === 'stop') {
+                    stopHits.push({ dist: endCum, stopId: leg.b.stopId });
+                }
+            });
+            totalDist = routeCum[routeCum.length - 1];
+
+            // Build a combined bounds object for fit
+            const fullBounds = L.latLngBounds(routePts);
+            map.fitBounds(fullBounds, { padding: [50, 50] });
+            window._routeBounds = fullBounds;
+
+            // Hide loader, enable play
+            const loader = document.getElementById('route-loader');
+            loader.style.opacity = '0';
+            setTimeout(() => loader.classList.add('hidden'), 500);
+            btnPlay.disabled = false;
+        }
+
+        // Kick off routing
+        const btnPlay = document.getElementById('btn-play-anim');
+        const btnStop = document.getElementById('btn-stop-anim');
+        btnPlay.disabled = true;
+
+        Promise.all(legs.map(fetchLeg)).then(buildAndDrawRoute);
+
+        // =====================================================================
+        //  Focus / navigation
+        // =====================================================================
+        function clearActiveCards() {
+            document.querySelectorAll('#itinerary-list > div').forEach(el => {
+                el.classList.remove('ring-2', 'ring-trip-accent', 'scale-[1.02]', 'z-20', 'border-transparent');
+                el.classList.add('border-gray-100');
+            });
+        }
+
+        function focusOnStop(id, flyToLocation = true) {
+            const stop = itineraryData.find(s => s.id === id);
+            if (flyToLocation) map.flyTo(stop.coords, 8, { duration: 1.5 });
+
+            setTimeout(() => { if (markers[id]) markers[id].openPopup(); }, flyToLocation ? 800 : 0);
+
+            clearActiveCards();
+            const activeCard = document.getElementById(`card-${id}`);
+            if (activeCard) {
+                activeCard.classList.remove('border-gray-100');
+                activeCard.classList.add('ring-2', 'ring-trip-accent', 'scale-[1.02]', 'z-20', 'border-transparent');
+                if (!flyToLocation) activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        document.getElementById('btn-fit-bounds').addEventListener('click', () => {
+            if (window._routeBounds) map.flyToBounds(window._routeBounds, { padding: [50, 50], duration: 1.5 });
+            map.closePopup();
+            clearActiveCards();
+        });
+
+        window.addEventListener('resize', () => map.invalidateSize());
+
+        // =====================================================================
+        //  Trip animation — vehicle follows the real road geometry
+        // =====================================================================
+        const carIcon = L.divIcon({
+            className: 'anim-icon',
+            html: '<div class="bg-trip-accent text-white rounded-full w-9 h-9 flex items-center justify-center shadow-[0_0_18px_rgba(59,130,246,0.7)] border-2 border-white text-sm"><i class="fa-solid fa-car-side"></i></div>',
+            iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18]
+        });
+        const boatIcon = L.divIcon({
+            className: 'anim-icon',
+            html: '<div class="bg-blue-400 text-white rounded-full w-9 h-9 flex items-center justify-center shadow-[0_0_18px_rgba(96,165,250,0.7)] border-2 border-white text-sm"><i class="fa-solid fa-ship"></i></div>',
+            iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18]
+        });
+
+        function interpolate(p1, p2, f) {
+            return [p1[0] + (p2[0] - p1[0]) * f, p1[1] + (p2[1] - p1[1]) * f];
+        }
+
+        // Position along the flattened route at a given travelled distance (km)
+        let _searchIdx = 0;
+        function positionAt(dist) {
+            if (dist <= 0) return routePts[0];
+            if (dist >= totalDist) return routePts[routePts.length - 1];
+            // advance the cursor forward (animation distance is monotonic)
+            while (_searchIdx < routeCum.length - 1 && routeCum[_searchIdx + 1] < dist) _searchIdx++;
+            while (_searchIdx > 0 && routeCum[_searchIdx] > dist) _searchIdx--;
+            const segLen = routeCum[_searchIdx + 1] - routeCum[_searchIdx];
+            const f = segLen > 0 ? (dist - routeCum[_searchIdx]) / segLen : 0;
+            return interpolate(routePts[_searchIdx], routePts[_searchIdx + 1], f);
+        }
+
+        function modeAt(dist) {
+            for (const b of legBounds) {
+                if (dist <= b.endCum + 0.001) return b.mode;
+            }
+            return 'drive';
+        }
+
+        let animMarker = null;
+        let isPlaying = false;
+        let animReqId = null;
+        let lastTs = null;
+        let travelled = 0;        // km along route
+        let isPaused = false;
+        let pauseEndTime = 0;
+        let nextStopIdx = 0;
+        let camLat = null, camLng = null;  // smoothed (trailing) camera centre
+        const SPEED_KMS = 750;    // animation speed (km per real second)
+        const CAM_EASE = 0.1;     // 0 = frozen camera, 1 = snaps instantly to vehicle
+
+        const progWrap = document.getElementById('anim-progress-wrap');
+        const progBar = document.getElementById('anim-progress');
+
+        function startAnimation() {
+            if (isPlaying || btnPlay.disabled) return;
+            isPlaying = true;
+            map.closePopup();
+
+            btnPlay.classList.add('hidden');
+            btnStop.classList.remove('hidden');
+            progWrap.classList.remove('hidden');
+
+            travelled = 0; _searchIdx = 0; nextStopIdx = 0;
+            isPaused = false; lastTs = null;
+
+            if (animMarker) map.removeLayer(animMarker);
+            animMarker = L.marker(routePts[0], { icon: carIcon }).addTo(map);
+            animMarker.bindPopup('', { closeButton: false, className: 'anim-popup' });
+
+            map.setZoom(8);
+            camLat = routePts[0][0]; camLng = routePts[0][1];
+            map.panTo(routePts[0]);
+
+            animReqId = requestAnimationFrame(animateLoop);
+        }
+
+        function stopAnimation() {
+            isPlaying = false;
+            cancelAnimationFrame(animReqId);
+            if (animMarker) map.removeLayer(animMarker);
+            btnStop.classList.add('hidden');
+            btnPlay.classList.remove('hidden');
+            progWrap.classList.add('hidden');
+            progBar.style.width = '0%';
+            if (window._routeBounds) map.fitBounds(window._routeBounds, { padding: [50, 50] });
+        }
+
+        function animateLoop(ts) {
+            if (!isPlaying) return;
+
+            if (isPaused) {
+                if (ts >= pauseEndTime) {
+                    isPaused = false; lastTs = ts;
+                    animMarker.closePopup();
+                } else {
+                    animReqId = requestAnimationFrame(animateLoop);
+                    return;
+                }
+            }
+
+            if (lastTs === null) lastTs = ts;
+            const dt = (ts - lastTs) / 1000;
+            lastTs = ts;
+
+            travelled += SPEED_KMS * dt;
+
+            // Did we reach the next sleeping stop? Clamp + pause there.
+            if (nextStopIdx < stopHits.length && travelled >= stopHits[nextStopIdx].dist) {
+                travelled = stopHits[nextStopIdx].dist;
+                const stopData = itineraryData.find(s => s.id === stopHits[nextStopIdx].stopId);
+                nextStopIdx++;
+
+                const pos = positionAt(travelled);
+                animMarker.setLatLng(pos);
+                camLat = pos[0]; camLng = pos[1];   // settle the camera on the stop
+                map.panTo(pos, { animate: false });
+
+                isPaused = true;
+                pauseEndTime = ts + 2500;
+
+                if (stopData) {
+                    animMarker.setPopupContent(`
+                        <div class="text-center p-2 min-w-[130px]">
+                            <i class="fa-solid fa-bed text-2xl text-blue-400 mb-2"></i>
+                            <h4 class="font-bold text-white mb-1">${stopData.day}</h4>
+                            <p class="text-xs text-gray-300">Sleeping at:<br><span class="text-white font-semibold">${stopData.hotel}</span></p>
+                        </div>
+                    `).openPopup();
+                    focusOnStop(stopData.id, false);
+                }
+                progBar.style.width = Math.min(100, (travelled / totalDist) * 100) + '%';
+                animReqId = requestAnimationFrame(animateLoop);
+                return;
+            }
+
+            // Trip finished?
+            if (travelled >= totalDist) {
+                progBar.style.width = '100%';
+                stopAnimation();
+                setTimeout(() => alert('Roadtrip Complete! Arrived safely back in Sidney.'), 200);
+                return;
+            }
+
+            const pos = positionAt(travelled);
+            animMarker.setLatLng(pos);
+            // Eased "trailing" camera — glides toward the vehicle instead of
+            // snapping to every road bend, which removes the jittery feel.
+            camLat += (pos[0] - camLat) * CAM_EASE;
+            camLng += (pos[1] - camLng) * CAM_EASE;
+            map.panTo([camLat, camLng], { animate: false });
+
+            // Switch vehicle based on current mode
+            const targetIcon = modeAt(travelled) === 'ferry' ? boatIcon : carIcon;
+            if (animMarker.getIcon() !== targetIcon) animMarker.setIcon(targetIcon);
+
+            progBar.style.width = ((travelled / totalDist) * 100) + '%';
+            animReqId = requestAnimationFrame(animateLoop);
+        }
+
+        btnPlay.addEventListener('click', startAnimation);
+        btnStop.addEventListener('click', stopAnimation);
+    </script>
+</body>
+</html>
